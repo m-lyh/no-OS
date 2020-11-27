@@ -45,6 +45,8 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "error.h"
+#include "delay.h"
+#include "util.h"
 
 /******************************************************************************/
 /********************** Macros and Constants Definitions **********************/
@@ -59,15 +61,24 @@
  * @param dev - The device structure.
  * @param reg_addr - The register address.
  * @param reg_data - The register data.
- * @return SUCCESS in case of success, negative error code otherwise.
+ * @return 0 in case of success, negative error code otherwise.
  */
-int32_t ad7091r5_spi_reg_read(struct ad7091r5_dev *dev,
-			    uint16_t reg_addr,
-			    uint8_t *reg_data)
+int32_t ad7091r5_i2c_reg_read(struct ad7091r5_dev *dev,
+			     uint8_t reg_addr,
+			     uint16_t *reg_data)
 {
+	uint8_t buf[2];
 	int32_t ret;
-	uint8_t buf[3];
 
+	ret = i2c_write(dev->i2c_desc, &reg_addr, 1, 0);
+	if (ret < 0)
+		return ret;
+
+	ret = i2c_read(dev->i2c_desc, buf, 2, 0);
+	if (ret < 0)
+		return ret;
+
+	*reg_data = (buf[1] << 8) | buf[0];
 
 	return ret;
 }
@@ -77,18 +88,57 @@ int32_t ad7091r5_spi_reg_read(struct ad7091r5_dev *dev,
  * @param dev - The device structure.
  * @param reg_addr - The register address.
  * @param reg_data - The register data.
- * @@eturn SUCCESS in case of success, negative error code otherwise.
+ * @return 0 in case of success, negative error code otherwise.
  */
-int32_t ad7091r5_spi_reg_write(struct ad7091r5_dev *dev,
-			     uint16_t reg_addr,
-			     uint8_t reg_data)
+int32_t ad7091r5_i2c_reg_write(struct ad7091r5_dev *dev,
+			      uint8_t reg_addr,
+			      uint16_t reg_data)
 {
-	int32_t ret;
 	uint8_t buf[3];
 
+	buf[0] = reg_addr;
+	buf[1] = (reg_data & 0xFF00) >> 8;
+	buf[2] = reg_data & 0xFF;
+
+	return i2c_write(dev->i2c_desc, buf, ARRAY_SIZE(buf), 0);
+}
+
+/**
+ * Multibyte read from device. A register read begins with the address
+ * and autoincrements for each aditional byte in the transfer.
+ * @param dev - The device structure.
+ * @param reg_addr - The register address.
+ * @param reg_data - The register data.
+ * @param count - Number of bytes to read.
+ * @return 0 in case of success, negative error code otherwise.
+ */
+int32_t ad7091r5_i2c_reg_read_multiple(struct ad7091r5_dev *dev,
+				      uint8_t reg_addr,
+				      uint8_t *reg_data,
+				      uint16_t count)
+{
+	uint8_t buf[512];
+	int32_t ret;
+
+	if (count > 512)
+		return FAILURE;
+
+	buf[0] = reg_addr;
+	memset(&buf[1], 0x00, count - 1);
+
+	ret = i2c_write(dev->i2c_desc, buf, 1, 0);
+	if (ret < 0)
+		return ret;
+
+	ret = i2c_read(dev->i2c_desc, buf, count, 0);
+	if (ret < 0)
+		return ret;
+
+	memcpy(reg_data, buf, count);
 
 	return ret;
 }
+
 
 /**
  * SPI read from device using a mask.
@@ -96,16 +146,18 @@ int32_t ad7091r5_spi_reg_write(struct ad7091r5_dev *dev,
  * @param reg_addr - The register address.
  * @param mask - The mask.
  * @param data - The register data.
- * @return SUCCESS in case of success, negative error code otherwise.
+ * @return 0 in case of success, negative error code otherwise.
  */
-int32_t ad7091r5_spi_read_mask(struct ad7091r5_dev *dev,
-			     uint16_t reg_addr,
+int32_t ad7091r5_i2c_read_mask(struct ad7091r5_dev *dev,
+			     uint8_t reg_addr,
 			     uint8_t mask,
 			     uint8_t *data)
 {
-	uint8_t reg_data[3];
+	uint8_t reg_data;
 	int32_t ret;
 
+	ret = ad7091r5_i2c_reg_read(dev, reg_addr, &reg_data);
+	*data = (reg_data & mask);
 
 	return ret;
 }
@@ -116,16 +168,87 @@ int32_t ad7091r5_spi_read_mask(struct ad7091r5_dev *dev,
  * @param reg_addr - The register address.
  * @param mask - The mask.
  * @param data - The register data.
- * @return SUCCESS in case of success, negative error code otherwise.
+ * @return 0 in case of success, negative error code otherwise.
  */
 int32_t ad7091r5_spi_write_mask(struct ad7091r5_dev *dev,
-			      uint16_t reg_addr,
+			      uint8_t reg_addr,
 			      uint8_t mask,
 			      uint8_t data)
 {
 	uint8_t reg_data;
 	int32_t ret;
 
+	ret = ad7091r5_i2c_reg_read(dev, reg_addr, &reg_data);
+	reg_data &= ~mask;
+	reg_data |= data;
+	ret |= ad7091r5_i2c_reg_write(dev, reg_addr, reg_data);
+
+	return ret;
+}
+
+static int ad7091r_set_mode(struct ad7091r_state *st, enum ad7091r_mode mode)
+{
+	int ret;
+
+	switch (mode) {
+	case AD7091R_MODE_SAMPLE:
+		ret = regmap_update_bits(st->map, AD7091R_REG_CONF,
+				REG_CONF_MODE_MASK, 0);
+		break;
+	case AD7091R_MODE_COMMAND:
+		ret = regmap_update_bits(st->map, AD7091R_REG_CONF,
+				REG_CONF_MODE_MASK, REG_CONF_CMD);
+		break;
+	case AD7091R_MODE_AUTOCYCLE:
+		ret = regmap_update_bits(st->map, AD7091R_REG_CONF,
+				REG_CONF_MODE_MASK, REG_CONF_AUTO);
+		break;
+	default:
+		ret = -EINVAL;
+		break;
+	}
+
+	if (!ret)
+		st->mode = mode;
+	return ret;
+}
+
+static int ad7091r_set_channel(struct ad7091r_state *st, unsigned channel)
+{
+	unsigned int foo;
+	int ret;
+
+	/* AD7091R_REG_CHANNEL is a 8-bit register */
+	ret = regmap_write(st->map, AD7091R_REG_CHANNEL,
+			BIT(channel) | (BIT(channel) << 8));
+	if (ret)
+		return ret;
+
+	/* There is a latency of one conversion before the channel conversion
+	 * sequence is updated */
+	return regmap_read(st->map, AD7091R_REG_RESULT, &foo);
+}
+
+static int ad7091r_read_one(struct iio_dev *iio_dev,
+		unsigned channel, unsigned int *read_val)
+{
+	struct ad7091r_state *st = iio_priv(iio_dev);
+	unsigned val;
+	int ret;
+
+	/* TODO: locking */
+	ret = ad7091r_set_channel(st, channel);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(st->map, AD7091R_REG_RESULT, &val);
+	if (ret)
+		return ret;
+
+	if (REG_RESULT_CH_ID(val) != channel)
+		return -EIO;
+
+	*read_val = REG_RESULT_CONV_RESULT(val);
 	return 0;
 }
 
@@ -151,12 +274,12 @@ static int32_t ad7091r5_init_gpio(struct ad7091r5_dev *dev,
 		if (ret != SUCCESS)
 			return ret;
 
-		mdelay(100);
+		udelay(1);
 		ret = gpio_set_value(dev->gpio_resetn, GPIO_HIGH);
 		if (ret != SUCCESS)
 			return ret;
 
-		mdelay(100);
+		udelay(1);
 	}
 
 	return SUCCESS;

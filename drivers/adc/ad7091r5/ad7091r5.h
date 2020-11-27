@@ -50,10 +50,33 @@
 /********************** Macros and Constants Definitions **********************/
 /******************************************************************************/
 /* AD7091r5 registers */
+#define AD7091R_REG_RESULT		0
+#define AD7091R_REG_CHANNEL		1
+#define AD7091R_REG_CONF		2
+#define AD7091R_REG_ALERT		3
+#define AD7091R_REG_CH_LOW_LIMIT(ch)	((ch) * 3 + 4)
+#define AD7091R_REG_CH_HIGH_LIMIT(ch)	((ch) * 3 + 5)
+#define AD7091R_REG_CH_HYSTERESIS(ch)	((ch) * 3 + 6)
+
+/* AD7091R_REG_RESULT */
+#define REG_RESULT_CH_ID(x)		(((x) >> 13) & 0x3)
+#define REG_RESULT_CONV_RESULT(x)	((x) & 0xfff)
+
+/* AD7091R_REG_CONF */
+#define REG_CONF_AUTO			BIT(8)
+#define REG_CONF_CMD			BIT(10)
+
+#define REG_CONF_MODE_MASK		(REG_CONF_AUTO | REG_CONF_CMD)
 
 /******************************************************************************/
 /*************************** Types Declarations *******************************/
 /******************************************************************************/
+enum ad7091r_mode {
+	AD7091R_MODE_SAMPLE,
+	AD7091R_MODE_COMMAND,
+	AD7091R_MODE_AUTOCYCLE,
+};
+
 /**
  * @struct ad7091r5_init_param
  * @brief  Structure containing the init parameters needed by the ad7091r5 device

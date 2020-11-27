@@ -22,7 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "i2c.h"
+#include "ad7091r5.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -79,26 +80,6 @@ int main_adi(void)
 	}
 }
 
-int main_adi1(void)
-{
-	/* Reset convertor */
-	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);
-	HAL_Delay(10);
-//	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_RESET);
-//	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_2, GPIO_PIN_SET);
-
-	uint8_t pData[8];
-	uint8_t i = 3;
-	while(1) {
-		pData[0] = 0x00;
-		pData[1] = 0x00;
-		pData[2] = i;
-		HAL_I2C_Master_Transmit(&hi2c3, 0xA5, pData, 2, 1000);
-		HAL_I2C_Master_Receive(&hi2c3, 0xA4, pData, 1, 1000);
-		i++;
-		HAL_Delay(1000);
-	}
-}
 /* USER CODE END 0 */
 
 /**
@@ -108,7 +89,19 @@ int main_adi1(void)
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+	struct ad7091r5_dev *ad7091r5_dev;
 
+	struct i2c_init_param ad7091r5_i2c_init = {
+		.max_speed_hz = 0,
+		.slave_address = (0x2f << 1),
+		.platform_ops = NULL,
+		.extra = &hi2c3,
+	};
+
+	struct ad7091r5_init_param init_param = {
+		.i2c_init = &ad7091r5_i2c_init,
+		.gpio_resetn = NULL,
+	};
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -128,10 +121,12 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
   MX_USART2_UART_Init();
+  MX_GPIO_Init();
   MX_I2C3_Init();
   /* USER CODE BEGIN 2 */
+  ad7091r5_init(&ad7091r5_dev, &init_param);
+
 
   /* USER CODE END 2 */
 
